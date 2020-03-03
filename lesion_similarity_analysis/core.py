@@ -111,5 +111,5 @@ def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
                 },
         name="similarity")
     output_filename = os.path.abspath(
-        os.path.join(output_path, f"sim_{LorR}_{hippoPart}.txt"))
+        os.path.join(output_path, f"sim_{LorR}_{hippoPart}.csv"))
     output.to_dataframe().to_csv(output_filename)
