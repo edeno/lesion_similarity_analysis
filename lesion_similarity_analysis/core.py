@@ -5,6 +5,7 @@ from itertools import combinations
 import dask
 import dask.array as da
 import numpy as np
+import xarray as xr
 from dask import delayed
 from skimage.io import imread
 from skimage.io.collection import alphanumeric_key
@@ -101,8 +102,14 @@ def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
         similarity = mirror_diagonal(similarity, n_animals)
         output.append(similarity)
 
-    output = np.stack(output, axis=-1)
+    output = xr.DataArray(
+        np.stack(output, axis=-1),
+        dims=["animal1", "animal2", "slice"],
+        coords={"animal1": animal_names,
+                "animal2": animal_names,
+                "slice": range(output.shape[-1])
+                },
+        name="similarity")
     output_filename = os.path.abspath(
         os.path.join(output_path, f"sim_{LorR}_{hippoPart}.txt"))
-    with open(output_filename, "w+") as file:
-        file.write(np.array2string(output))
+    output.to_dataframe().to_csv(output_filename)
