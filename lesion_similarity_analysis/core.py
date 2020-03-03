@@ -1,9 +1,15 @@
-import time
+import os.path
+from glob import glob
 from itertools import combinations
 
+import dask
+import dask.array as da
 import numpy as np
-from skimage import io
+from dask import delayed
+from skimage.io import imread
+from skimage.io.collection import alphanumeric_key
 from skimage.metrics import structural_similarity as ssim
+from tqdm.auto import tqdm
 
 animals = np.array([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
                     111, 112, 113, 114, 115,
@@ -12,7 +18,7 @@ animals = np.array([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
 control = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0,
                     1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0])
 
-output_size = {
+SLICE_SIZE = {
     ("L", "Dorsal"): 363,
     ("L", "Intermediate"): 498,
     ("R", "Dorsal"): 349,
@@ -20,86 +26,78 @@ output_size = {
 }
 
 
-def evaluateAllSlice(LorR, hippoPart, sigma):
+def get_animal_names(filenames, LorR):
+    return [os.path.basename(fn).split(LorR)[0] for fn in filenames]
+
+
+def get_slice_filenames(data_path, hippoPart, LorR, slice_id):
+    path = f"{data_path}/{hippoPart}/{LorR}/**/*{LorR}{slice_id:04d}.tif"
+    filenames = glob(path)
+    return sorted(filenames, key=alphanumeric_key)
+
+
+def load_images(filenames):
+    sample = imread(filenames[0])
+
+    lazy_imread = delayed(imread)  # lazy reader
+    lazy_arrays = [lazy_imread(fn) for fn in filenames]
+    dask_arrays = [
+        da.from_delayed(delayed_reader, shape=sample.shape, dtype=sample.dtype)
+        for delayed_reader in lazy_arrays
+    ]
+    # Stack into one large dask.array
+    return da.stack(dask_arrays, axis=0)
+
+
+def compute_structural_similarity(images, sigma):
+    n_animals = images.shape[0]
+    result = [
+        dask.delayed(ssim)(images[i], images[j],
+                           gaussian_weights=True, sigma=sigma)
+        for i, j in combinations(range(n_animals), 2)
+    ]
+    return np.asarray(dask.compute(*result, scheduler="processes"))
+
+
+def mirror_diagonal(similarity, n_animals):
+    output = np.full((n_animals, n_animals), np.nan)
+    i, j = zip(*list(combinations(range(n_animals), 2)))
+    output[(i, j)] = similarity
+    output[(j, i)] = similarity
+    return output
+
+
+def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
     """
 
     Parameters
     ----------
-    LorR : ("L", "R")
-        Brain hemisphere
+    data_path : str
+        File path to data directory
     hippoPart : ("Dorsal", "Intermediate")
         Sub area of the hippocampus
+    LorR : ("L", "R")
+        Brain hemisphere
     sigma : float
         Gaussian standard deviation
+    output_path : str
+        Where to save the output
 
     """
-    duration = 0
-    n_slices = output_size[(LorR, hippoPart)]
-    output = np.zeros((animals.size, animals.size, n_slices))
+    n_slices = SLICE_SIZE[LorR, hippoPart]
+    output = []
 
-    for i in range(n_slices):
-        if i < 10:
-            which = f"000{i}"
-        elif i < 100:
-            which = f"00{i}"
-        elif i < 1000:
-            which = f"0{i}"
-        else:
-            which = str(i)
-        start = time.time()
-        sim = getAllSim(which, LorR, hippoPart, sigma)
-        fullSim = completeArray(sim)
-        output[:, :, i] = fullSim[:, :]
-        end = time.time()
+    for slice_ind in tqdm(range(n_slices), desc="slices"):
+        filenames = get_slice_filenames(data_path, hippoPart, LorR, slice_ind)
+        animal_names = get_animal_names(filenames, LorR)
+        n_animals = len(animal_names)
+        images = load_images(filenames)
+        similarity = compute_structural_similarity(images, sigma)
+        similarity = mirror_diagonal(similarity, n_animals)
+        output.append(similarity)
 
-        duration *= i
-        duration += (end - start)
-        duration /= (i + 1)
-        print(duration)
-        print(((n_slices - i - 1) * duration) / 60)
-
-    output_filename = f"Desktop/sim_{LorR}_{hippoPart}.txt"
+    output = np.stack(output, axis=-1)
+    output_filename = os.path.abspath(
+        os.path.join(output_path, f"sim_{LorR}_{hippoPart}.txt"))
     with open(output_filename, "w+") as file:
         file.write(np.array2string(output))
-
-
-def getAllSim(which, LorR, hippoPart, sigma):
-    sim = np.full((animals.size, animals.size), np.nan)
-    for i, j in combinations(range(animals.size), 2):
-        sim[i][j] = getSim(str(animals[i]), str(
-            animals[j]), which, LorR, hippoPart, sigma)
-    return sim
-
-
-def getSim(an1, an2, which, LorR, hippoPart, sigma):
-    im1 = loadImage(an1, which, LorR, hippoPart)
-    im2 = loadImage(an2, which, LorR, hippoPart)
-    return ssim(im1, im2, gaussian_weights=True, sigma=sigma)
-
-
-def loadImage(nm, which, LorR, hippoPart):
-    imageStr = f"Desktop/FXScoh4/Cropped/{hippoPart}/{LorR}/{nm}/{nm}/{nm}{LorR}{which}.tiff"
-    image = io.imread(imageStr)
-    return image
-
-
-def getNN(input):
-    NNinfo = np.zeros((input.shape[0], 2))
-    for i in range(control.size):
-        for j in range(control.size):
-            if control[j]:
-                if(NNinfo[i][0] < input[i][j]):
-                    NNinfo[i][0] = input[i][j]
-                    NNinfo[i][1] = control[j]
-    return NNinfo
-
-
-def completeArray(input):
-    fullSim = np.zeros((animals.size, animals.size))
-    for i in range(animals.size):
-        for j in range(animals.size):
-            if(i < j):
-                fullSim[i][j] = input[j][i]
-            else:
-                fullSim[i][j] = input[i][j]
-    return fullSim
