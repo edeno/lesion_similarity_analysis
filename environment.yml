@@ -8,6 +8,7 @@ dependencies:
 - scipy
 - scikit-image
 - dask
+- dask-image
 - xarray
 - napari
 - matplotlib
