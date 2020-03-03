@@ -88,10 +88,15 @@ def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
     output = []
 
     for slice_ind in tqdm(range(n_slices), desc="slices"):
+        # Get same slice for each animal
         filenames = get_slice_filenames(data_path, hippoPart, LorR, slice_ind)
         animal_names = get_animal_names(filenames, LorR)
         n_animals = len(animal_names)
+
+        # Load images
         images = load_images(filenames)
+
+        # Find similarity between images across animals
         similarity = compute_structural_similarity(images, sigma)
         similarity = mirror_diagonal(similarity, n_animals)
         output.append(similarity)
