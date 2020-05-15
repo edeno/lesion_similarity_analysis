@@ -4,7 +4,7 @@ from lesion_similarity_analysis.core import SLICE_SIZE, evaluate_slices
 
 
 def main():
-    data_path = "/stelmo/david/FXS/coh4/lesionEvaluation/FXScoh4/Cropped/"
+    data_path = "/data2/data1_backup/david/FXS/FXScoh3/LesionEvaluation/FXScoh3"
     for LorR, hippoPart in SLICE_SIZE:
         print(f"Evaluating {hippoPart}, {LorR}")
         evaluate_slices(data_path, hippoPart, LorR, sigma=50,

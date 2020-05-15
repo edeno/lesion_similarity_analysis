@@ -1,4 +1,5 @@
 import os.path
+import re
 from glob import glob
 from itertools import combinations
 
@@ -7,33 +8,32 @@ import dask.array as da
 import numpy as np
 import xarray as xr
 from dask import delayed
+from tqdm.auto import tqdm
+
 from skimage.io import imread
 from skimage.io.collection import alphanumeric_key
 from skimage.metrics import structural_similarity as ssim
-from tqdm.auto import tqdm
-
-animals = np.array([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
-                    111, 112, 113, 114, 115,
-                    200, 201, 202, 203, 204, 205, 206, 207, 208])
-
-control = np.array([0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0,
-                    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0])
 
 SLICE_SIZE = {
-    ("L", "Dorsal"): 363,
-    ("L", "Intermediate"): 498,
-    ("R", "Dorsal"): 349,
-    ("R", "Intermediate"): 500,
+    ("dorsal"): 602,
+    ("intermediate"): 755,
 }
 
 
-def get_animal_names(filenames, LorR):
-    return [os.path.basename(fn).split(LorR)[0] for fn in filenames]
+def get_animal_name(filename, pattern_matcher):
+    animal, hemisphere, _ = pattern_matcher.findall(
+        os.path.basename(filename))[0]
+    return f"{animal}-{hemisphere}"
 
 
-def get_slice_filenames(data_path, hippoPart, LorR, slice_id):
-    path = f"{data_path}/{hippoPart}/{LorR}/**/*{LorR}{slice_id:04d}.tif"
-    filenames = glob(path)
+def get_animal_names(filenames):
+    pattern_matcher = re.compile(r"([\w]+)(L|R)([\d]+).tif")
+    return [get_animal_name(fn, pattern_matcher) for fn in filenames]
+
+
+def get_slice_filenames(data_path, hippoPart, slice_id):
+    path = os.path.join(data_path, hippoPart, "**", f"*{slice_id:04d}.tif")
+    filenames = glob(path, recursive=True)
     return sorted(filenames, key=alphanumeric_key)
 
 
@@ -68,7 +68,7 @@ def mirror_diagonal(similarity, n_animals):
     return output
 
 
-def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
+def evaluate_slices(data_path, hippoPart, sigma, output_path=""):
     """
 
     Parameters
@@ -77,21 +77,19 @@ def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
         File path to data directory
     hippoPart : ("Dorsal", "Intermediate")
         Sub area of the hippocampus
-    LorR : ("L", "R")
-        Brain hemisphere
     sigma : float
         Gaussian standard deviation
     output_path : str
         Where to save the output
 
     """
-    n_slices = SLICE_SIZE[LorR, hippoPart]
+    n_slices = SLICE_SIZE[hippoPart]
     output = []
 
     for slice_ind in tqdm(range(n_slices), desc="slices"):
         # Get same slice for each animal
-        filenames = get_slice_filenames(data_path, hippoPart, LorR, slice_ind)
-        animal_names = get_animal_names(filenames, LorR)
+        filenames = get_slice_filenames(data_path, hippoPart, slice_ind)
+        animal_names = get_animal_names(filenames)
         n_animals = len(animal_names)
 
         # Load images
@@ -111,5 +109,5 @@ def evaluate_slices(data_path, hippoPart, LorR, sigma, output_path=""):
                 },
         name="similarity")
     output_filename = os.path.abspath(
-        os.path.join(output_path, f"sim_{LorR}_{hippoPart}.csv"))
+        os.path.join(output_path, f"sim_{hippoPart}.csv"))
     output.to_dataframe().to_csv(output_filename)
