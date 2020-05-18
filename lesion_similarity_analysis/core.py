@@ -6,10 +6,10 @@ from itertools import combinations
 import dask
 import dask.array as da
 import numpy as np
-import xarray as xr
 from dask import delayed
 from tqdm.auto import tqdm
 
+import xarray as xr
 from skimage.io import imread
 from skimage.io.collection import alphanumeric_key
 from skimage.metrics import structural_similarity as ssim
@@ -100,8 +100,9 @@ def evaluate_slices(data_path, hippoPart, sigma, output_path=""):
         similarity = mirror_diagonal(similarity, n_animals)
         output.append(similarity)
 
+    output = np.stack(output, axis=-1)
     output = xr.DataArray(
-        np.stack(output, axis=-1),
+        output,
         dims=["animal1", "animal2", "slice"],
         coords={"animal1": animal_names,
                 "animal2": animal_names,
